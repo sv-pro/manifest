@@ -1,6 +1,6 @@
 # Manifest Development Guidelines
 
-Last updated: 2026-04-12
+Last updated: 2026-05-03
 
 ## What Manifest Is
 
@@ -79,18 +79,31 @@ packages/
 │   │   │   ├── ollama-sync.service.ts       # Ollama model sync
 │   │   │   ├── quality-score.util.ts        # Model quality scoring
 │   │   │   └── seed-messages.ts             # Demo agent message seed data
-│   │   ├── entities/                        # TypeORM entities (17 files)
+│   │   ├── entities/                        # TypeORM entities (23 files)
 │   │   │   ├── tenant.entity.ts             # Multi-tenant root
 │   │   │   ├── agent.entity.ts              # Agent (belongs to tenant)
 │   │   │   ├── agent-api-key.entity.ts      # OTLP ingest keys (mnfst_*)
-│   │   │   └── ...                          # agent-message, agent-log, llm-call, tool-execution, etc.
+│   │   │   ├── agent-message.entity.ts      # Telemetry messages
+│   │   │   ├── agent-log.entity.ts          # Agent log entries
+│   │   │   ├── llm-call.entity.ts           # Individual LLM call records
+│   │   │   ├── tool-execution.entity.ts     # Tool call records
+│   │   │   ├── custom-provider.entity.ts    # User-defined custom LLM providers
+│   │   │   ├── user-provider.entity.ts      # Connected provider config + cached models
+│   │   │   ├── tier-assignment.entity.ts    # Per-agent tier → model mappings
+│   │   │   ├── specificity-assignment.entity.ts # Per-agent specificity category config
+│   │   │   ├── header-tier.entity.ts        # Header-based tier routing rules
+│   │   │   ├── notification-rule.entity.ts  # Alert threshold rules
+│   │   │   ├── notification-log.entity.ts   # Notification delivery history
+│   │   │   ├── email-provider-config.entity.ts  # Email provider credentials (Mailgun/Resend/SMTP)
+│   │   │   ├── install-metadata.entity.ts   # Persisted install ID for telemetry
+│   │   │   └── api-key.entity.ts            # API key records
 │   │   ├── common/
 │   │   │   ├── guards/api-key.guard.ts      # X-API-Key header auth (timing-safe)
 │   │   │   ├── decorators/public.decorator.ts
 │   │   │   ├── dto/                         # create-agent, range-query, rename-agent DTOs
 │   │   │   ├── filters/spa-fallback.filter.ts
 │   │   │   ├── interceptors/               # agent-cache, user-cache
-│   │   │   ├── constants/                   # api-key, cache, ollama, providers
+│   │   │   ├── constants/                   # api-key, cache, ollama, providers (re-exports from shared)
 │   │   │   ├── services/                    # ingest-event-bus, manifest-runtime, tenant-cache
 │   │   │   ├── utils/range.util.ts
 │   │   │   ├── utils/hash.util.ts           # API key hashing (scrypt KDF)
@@ -102,25 +115,67 @@ packages/
 │   │   │   └── utils/period.util.ts         # Time period utilities
 │   │   ├── health/                          # @Public() health check
 │   │   ├── analytics/                       # Dashboard analytics
-│   │   │   ├── controllers/                 # overview, tokens, costs, messages, agents
-│   │   │   └── services/                    # aggregation + timeseries-queries + query-helpers
+│   │   │   ├── controllers/                 # overview, tokens, costs, messages, agents, savings
+│   │   │   └── services/                    # aggregation, timeseries-queries, messages-query,
+│   │   │                                    # message-details, message-feedback, agent-analytics,
+│   │   │                                    # agent-duplication, agent-lifecycle, savings-query,
+│   │   │                                    # specificity-feedback, query-helpers
 │   │   ├── otlp/                            # Agent key auth + onboarding
 │   │   │   ├── guards/agent-key-auth.guard.ts # Bearer token auth (agent API keys)
 │   │   │   └── services/api-key.service.ts  # Agent onboarding (creates tenant+agent+key)
 │   │   ├── routing/                         # LLM routing (providers, tiers, proxy, scorer)
-│   │   │   ├── proxy/                       # OpenAI-compatible proxy (anthropic/google adapters)
-│   │   │   ├── routing-core/               # Tier, provider, specificity services + cache
+│   │   │   ├── proxy/                       # OpenAI-compatible proxy (anthropic/google/chatgpt adapters,
+│   │   │   │                                #   stream-writer, fallback, dedup, rate-limiter, copilot-token)
+│   │   │   ├── routing-core/               # Tier, provider, specificity services + cache + routing-invalidation
+│   │   │   ├── resolve/                     # Scoring-based tier + specificity resolution
+│   │   │   ├── custom-provider/             # User-defined custom LLM provider CRUD + probe endpoint
+│   │   │   ├── header-tiers/               # Header-based tier routing rules CRUD
+│   │   │   ├── oauth/                       # OpenAI OAuth + MiniMax OAuth device-code flows
+│   │   │   ├── copilot.controller.ts        # GitHub Copilot device-code + token-poll endpoints
 │   │   │   ├── specificity.controller.ts   # Specificity routing CRUD endpoints
-│   │   │   └── resolve/                     # Scoring-based tier + specificity resolution
+│   │   │   ├── tier.controller.ts          # Tier override + fallback + complexity toggle
+│   │   │   ├── provider.controller.ts      # Provider connect/disconnect/status
+│   │   │   └── model.controller.ts         # Model refresh, available models, pricing health
 │   │   ├── scoring/                         # Request complexity scoring engine
-│   │   │   ├── keywords.ts                 # Keyword lists for all dimensions (complexity + specificity)
+│   │   │   ├── keywords.ts / keywords/     # Keyword lists for all dimensions
 │   │   │   ├── specificity-detector.ts     # Task-type detection (coding, trading, etc.)
-│   │   │   └── scan-messages.ts            # Message scanner for specificity detection
+│   │   │   ├── specificity-signals.ts      # Signal definitions per category
+│   │   │   ├── specificity-weights.ts      # Per-category weight tuning
+│   │   │   ├── scan-messages.ts            # Message scanner for specificity detection
+│   │   │   ├── envelope-peeler.ts          # Extract user-facing messages from payloads
+│   │   │   ├── keyword-trie.ts             # Trie-based fast keyword lookup
+│   │   │   ├── momentum.ts                 # Rolling score momentum
+│   │   │   ├── overrides.ts                # Score overrides
+│   │   │   └── dimensions/                 # Per-dimension scoring logic
+│   │   ├── model-discovery/                 # Provider model discovery + enrichment
+│   │   │   ├── model-discovery.service.ts  # Orchestrator: decrypt key → fetch → enrich → cache
+│   │   │   ├── provider-model-fetcher.service.ts  # Config-driven fetcher (Anthropic/Gemini/OpenRouter/etc.)
+│   │   │   ├── model-fallback.ts           # OpenRouter pricing fallback for providers without /models
+│   │   │   ├── anthropic-subscription-probe.ts    # Detects Anthropic subscription (Claude.ai) auth
+│   │   │   ├── opencode-go-catalog.service.ts     # OpenCode Go model catalog
+│   │   │   └── provider-model-registry.service.ts # In-memory registry of fetched model lists
 │   │   ├── model-prices/                    # Model pricing management + sync
+│   │   ├── free-models/                     # Free/no-cost model discovery + sync
+│   │   │   ├── free-models.service.ts      # Aggregates free models from all providers
+│   │   │   ├── free-models.controller.ts   # GET /api/v1/free-models (authenticated)
+│   │   │   └── free-models-sync.service.ts # Background sync of free model lists
 │   │   ├── notifications/                   # Alert rules, email providers, cron
+│   │   │   ├── notifications.controller.ts  # Full CRUD + email provider + test/trigger endpoints
+│   │   │   ├── alert-scenarios.service.ts   # Scenario evaluation for threshold checks
+│   │   │   ├── email-provider-config.service.ts  # Multi-provider email config management
+│   │   │   ├── email-provider-validation.service.ts # Provider credential validation
+│   │   │   ├── limit-check.service.ts       # Threshold checking logic
+│   │   │   ├── notification-cron.service.ts # @Cron periodic threshold checking
+│   │   │   ├── notification-email.service.ts # Email dispatch (Mailgun/Resend/SMTP)
+│   │   │   ├── notification-log.service.ts  # Delivery history logging
+│   │   │   └── emails/                      # React Email templates
+│   │   ├── public-stats/                    # Public (unauthenticated) aggregate statistics
+│   │   │   └── public-stats.controller.ts  # GET /api/v1/public/{usage,free-models,provider-tokens,free-providers}
+│   │   ├── setup/                           # First-run setup (admin account creation)
+│   │   │   └── setup.controller.ts         # GET /api/v1/setup/status, POST /api/v1/setup/admin
 │   │   ├── github/                          # GitHub stars endpoint
 │   │   ├── sse/                             # Server-Sent Events for real-time updates
-│   │   └── security/                        # GET /api/v1/security
+│   │   └── telemetry/                       # Anonymous usage telemetry (self-hosted)
 │   └── test/                                # E2E tests (supertest)
 ├── frontend/
 │   ├── src/
@@ -157,7 +212,15 @@ packages/
 │   │   ├── layouts/                         # Layout components
 │   │   └── styles/
 │   └── tests/
-└── shared/                           # Shared TypeScript types + helpers (consumed by backend and frontend)
+├── shared/                           # Shared TypeScript types + helpers (consumed by backend and frontend)
+│   └── src/
+│       ├── providers.ts              # CANONICAL provider registry (SHARED_PROVIDERS) — single source of truth
+│       ├── specificity.ts            # SPECIFICITY_CATEGORIES (9 task-type categories)
+│       ├── agent-type.ts             # AGENT_PLATFORMS, AGENT_CATEGORIES, PLATFORM_LABELS, PLATFORM_ICONS
+│       ├── tiers.ts / tier-colors.ts # Tier definitions and UI colors
+│       ├── subscription/             # Subscription provider configs, helpers, types
+│       └── ...                       # resolve-response, model-route, api-key, auth-types, provider-inference
+└── manifest/                         # Code-free shell package — holds canonical Docker image version (6.0.1)
 ```
 
 ## Single-Service Deployment
@@ -311,30 +374,68 @@ All analytics queries filter by user via `addTenantFilter(qb, userId)` from `que
 |--------|-------|------|---------|
 | GET | `/api/v1/health` | Public | Health check |
 | ALL | `/api/auth/*` | Public | Better Auth (login, register, OAuth, sessions) |
+| GET | `/api/v1/setup/status` | Public | First-run setup status |
+| POST | `/api/v1/setup/admin` | Public | Create initial admin account |
+| GET | `/api/v1/public/usage` | Public | Aggregate usage stats (cached) |
+| GET | `/api/v1/public/free-models` | Public | Free model list |
+| GET | `/api/v1/public/provider-tokens` | Public | Provider daily token stats |
+| GET | `/api/v1/public/free-providers` | Public | Free provider list |
+| GET | `/api/v1/github/stars` | Public | GitHub star count |
 | GET | `/api/v1/overview` | Session/API Key | Dashboard summary |
 | GET | `/api/v1/tokens` | Session/API Key | Token usage analytics |
 | GET | `/api/v1/costs` | Session/API Key | Cost analytics |
+| GET | `/api/v1/savings` | Session/API Key | Cost savings summary |
+| GET | `/api/v1/savings/timeseries` | Session/API Key | Cost savings over time |
+| GET | `/api/v1/savings/baseline-candidates` | Session/API Key | Models eligible as cost baseline |
 | GET | `/api/v1/messages` | Session/API Key | Paginated message log |
+| GET | `/api/v1/messages/:id/details` | Session/API Key | Full message detail (tokens, timing, etc.) |
+| PATCH | `/api/v1/messages/:id/feedback` | Session/API Key | Submit routing feedback on a message |
+| DELETE | `/api/v1/messages/:id/feedback` | Session/API Key | Clear routing feedback |
+| PATCH | `/api/v1/messages/:id/miscategorized` | Session/API Key | Flag specificity miscategorization |
+| DELETE | `/api/v1/messages/:id/miscategorized` | Session/API Key | Clear miscategorization flag |
 | GET | `/api/v1/agents` | Session/API Key | Agent list with sparklines |
 | POST | `/api/v1/agents` | Session/API Key | Create agent + API key |
+| GET | `/api/v1/agents/:name` | Session/API Key | Get single agent detail |
+| GET | `/api/v1/agents/:name/duplicate-preview` | Session/API Key | Preview duplicate agent config |
+| POST | `/api/v1/agents/:name/duplicate` | Session/API Key | Duplicate agent with routing config |
 | DELETE | `/api/v1/agents/:name` | Session/API Key | Delete agent |
 | GET | `/api/v1/agents/:name/key` | Session/API Key | Get agent API key |
 | POST | `/api/v1/agents/:name/rotate-key` | Session/API Key | Rotate API key |
 | PATCH | `/api/v1/agents/:name` | Session/API Key | Rename agent |
-| GET | `/api/v1/security` | Session/API Key | Security score + events |
 | GET | `/api/v1/model-prices` | Session/API Key | Model pricing list |
+| GET | `/api/v1/free-models` | Session/API Key | Free/no-cost model list |
 | GET | `/api/v1/agent/:agentName/usage` | Session/API Key | Per-agent token usage |
 | GET | `/api/v1/agent/:agentName/costs` | Session/API Key | Per-agent cost data |
 | GET/POST/PATCH/DELETE | `/api/v1/notifications` | Session/API Key | Notification rules CRUD |
 | GET/POST/DELETE | `/api/v1/notifications/email-provider` | Session/API Key | Email provider config |
-| GET/POST/PUT/DELETE | `/api/v1/routing/*` | Session/API Key | Routing config (tiers + providers) |
-| GET/PUT/POST/DELETE | `/api/v1/routing/:agent/specificity/*` | Session/API Key | Specificity routing config |
-| POST | `/api/v1/routing/subscription-providers` | Session/API Key | Subscription provider config |
-| POST | `/api/v1/routing/:agentName/ollama/sync` | Session/API Key | Sync Ollama models |
+| GET/POST | `/api/v1/notifications/notification-email` | Session/API Key | Test notification email |
+| POST | `/api/v1/notifications/trigger-check` | Session/API Key | Manually trigger threshold check |
+| GET | `/api/v1/notifications/logs` | Session/API Key | Notification delivery history |
+| GET | `/api/v1/routing/:agentName/status` | Session/API Key | Provider connection status |
+| GET/POST | `/api/v1/routing/:agentName/providers` | Session/API Key | List / connect providers |
+| DELETE | `/api/v1/routing/:agentName/providers/:provider` | Session/API Key | Disconnect provider |
+| POST | `/api/v1/routing/:agentName/providers/deactivate-all` | Session/API Key | Deactivate all providers |
+| GET/PUT/DELETE | `/api/v1/routing/:agentName/tiers/:tier` | Session/API Key | Tier override CRUD |
+| POST | `/api/v1/routing/:agentName/tiers/reset-all` | Session/API Key | Reset all tier overrides |
+| GET/PUT/DELETE | `/api/v1/routing/:agentName/tiers/:tier/fallbacks` | Session/API Key | Tier fallback model config |
+| GET | `/api/v1/routing/:agentName/complexity/status` | Session/API Key | Complexity routing on/off status |
+| POST | `/api/v1/routing/:agentName/complexity/toggle` | Session/API Key | Toggle complexity routing |
+| GET/PUT/POST/DELETE | `/api/v1/routing/:agentName/specificity/*` | Session/API Key | Specificity routing config |
+| GET/POST/PUT/DELETE | `/api/v1/routing/:agentName/custom-providers` | Session/API Key | Custom LLM provider CRUD |
+| POST | `/api/v1/routing/:agentName/custom-providers/probe` | Session/API Key | Test custom provider connectivity |
+| GET/POST/PUT/PATCH/DELETE | `/api/v1/routing/:agentName/header-tiers` | Session/API Key | Header-based tier routing rules |
+| GET | `/api/v1/routing/:agentName/seen-headers` | Session/API Key | Headers observed in recent requests |
+| GET | `/api/v1/routing/:agentName/available-models` | Session/API Key | Models available for tier assignment |
+| POST | `/api/v1/routing/:agentName/refresh-models` | Session/API Key | Re-fetch models from provider APIs |
+| POST | `/api/v1/routing/ollama/sync` | Session/API Key | Sync Ollama local model list |
+| GET | `/api/v1/routing/pricing-health` | Session/API Key | OpenRouter pricing cache health |
+| POST | `/api/v1/routing/pricing/refresh` | Session/API Key | Manually refresh pricing cache |
+| POST | `/api/v1/routing/:agentName/copilot/device-code` | Session/API Key | GitHub Copilot device-code auth start |
+| POST | `/api/v1/routing/:agentName/copilot/poll-token` | Session/API Key | Poll for Copilot OAuth token |
 | POST | `/api/v1/routing/resolve` | Bearer (mnfst_*) | Model resolution |
-| POST | `/v1/chat/completions` | Bearer (mnfst_*) | LLM proxy (OpenAI-compatible) |
+| POST | `/v1/chat/completions` | Bearer (mnfst_*) | LLM proxy (OpenAI chat completions) |
+| POST | `/v1/responses` | Bearer (mnfst_*) | LLM proxy (OpenAI Responses API) |
 | GET | `/api/v1/events` | Session | SSE real-time events |
-| GET | `/api/v1/github/stars` | Public | GitHub star count |
 
 ## Environment Variables
 
@@ -454,15 +555,21 @@ values with 400, so downgrades stay safe.
 
 ### Provider Registry (Single Source of Truth)
 
-All provider definitions live in `common/constants/providers.ts` (`PROVIDER_REGISTRY`). This is the **only** place to define provider IDs, display names, aliases, and OpenRouter prefix mappings. Never hardcode provider names elsewhere — always import from the registry.
+The canonical provider list lives in **`packages/shared/src/providers.ts`** as `SHARED_PROVIDERS`. This is the **only** place to define provider IDs, display names, aliases, OpenRouter prefix mappings, key requirements, and UI hints. Both the backend and frontend consume from this shared definition — they can never drift on any shared fact.
 
-The registry exports derived maps used throughout the codebase:
+The backend re-exports everything under historical names from `common/constants/providers.ts`:
+- `PROVIDER_REGISTRY` — the full list (alias for `SHARED_PROVIDERS`)
 - `PROVIDER_BY_ID` — lookup by canonical ID (e.g. `anthropic`, `gemini`)
 - `PROVIDER_BY_ID_OR_ALIAS` — lookup by ID or alias (e.g. `google` → gemini entry)
 - `OPENROUTER_PREFIX_TO_PROVIDER` — OpenRouter vendor prefix → display name (e.g. `openai` → `OpenAI`)
-- `expandProviderNames()` — expands a set of names to include aliases
 
-**Do NOT duplicate the provider list here.** Read `PROVIDER_REGISTRY` in `common/constants/providers.ts` for the current list of supported providers, their IDs, aliases, and OpenRouter prefix mappings.
+Current providers (17): `qwen` (Alibaba), `anthropic`, `deepseek`, `copilot` (GitHub Copilot), `gemini` (Google), `minimax`, `mistral`, `moonshot` (Kimi), `llamacpp`, `lmstudio`, `ollama`, `ollama-cloud`, `openai`, `opencode-go`, `openrouter`, `xai`, `zai` (Z.ai).
+
+Local-only providers (`localOnly: true`): `ollama`, `lmstudio`, `llamacpp`. These are tagged `auth_type: 'local'` by the proxy and shown under the Local tab in the UI.
+
+`tileOnly: true` providers (`lmstudio`, `llamacpp`) have no fixed proxy endpoint — the proxy routes through a `custom:<uuid>` path using the user-entered base URL. The proxy endpoint sanity tests skip these entries.
+
+**Do NOT hardcode provider names/IDs outside the shared package.** Always import from `manifest-shared` (backend) or directly from `packages/shared/src/providers.ts` (frontend).
 
 ### Adding a New Specificity Category
 
@@ -478,10 +585,10 @@ The `specificity_assignments` table and UI components handle new categories auto
 
 ### Adding a New Provider
 
-1. Add entry to `PROVIDER_REGISTRY` in `common/constants/providers.ts`
-2. Add `FetcherConfig` in `routing/model-discovery/provider-model-fetcher.service.ts`
-3. Add `ProviderEndpoint` in `routing/proxy/provider-endpoints.ts`
-4. Add `ProviderDef` in `frontend/src/services/providers.ts`
+1. Add a `SharedProviderEntry` to `SHARED_PROVIDERS` in `packages/shared/src/providers.ts` — this is the only place provider IDs, aliases, OpenRouter prefixes, and UI hints are defined
+2. Add a `FetcherConfig` in `packages/backend/src/model-discovery/provider-model-fetcher.service.ts`
+3. Add a `ProviderEndpoint` in `packages/backend/src/routing/proxy/provider-endpoints.ts`
+4. (Optional) Add UI-only bits (e.g. a `StageDef`) in `packages/frontend/src/services/providers.ts` if the provider needs custom UI treatment
 
 ### Model Discovery
 
@@ -499,11 +606,12 @@ User connects provider (POST /routing/:agent/providers)
   → recalculates tier assignments
 ```
 
-- `ProviderModelFetcherService` — config-driven fetcher with parsers for each provider API format (OpenAI-compatible, Anthropic, Gemini, OpenRouter, Ollama)
+- `ProviderModelFetcherService` — config-driven fetcher in `model-discovery/` with parsers for each provider API format (OpenAI-compatible, Anthropic, Gemini, OpenRouter, Ollama, OpenCode Go)
 - `ModelDiscoveryService` — orchestrator that decrypts keys, fetches, enriches with pricing, caches results. Falls back to OpenRouter cache when native API is unavailable.
+- `AnthropicSubscriptionProbeService` — detects Claude.ai subscription auth vs. API key auth for Anthropic providers
 - `cached_models` — per-provider, per-agent JSONB column on `user_providers` table
 - Discovery runs synchronously on provider connect (user sees models immediately)
-- "Refresh models" button triggers `POST /routing/:agent/refresh-models`
+- "Refresh models" button triggers `POST /api/v1/routing/:agentName/refresh-models`
 
 ### Model Pricing
 
